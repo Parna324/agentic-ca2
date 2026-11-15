@@ -2,6 +2,8 @@
 import uuid
 import logging
 import asyncio
+import io
+import zipfile
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -123,7 +125,10 @@ async def run_review_pipeline(review_id: str, state: ReviewChangeState):
             db.add(db_log)
 
         # Update review record
-        recommendation = result.get("recommendation", {})
+        recommendation = result.get("recommendation") or {
+            "decision": result.get("decision", "PENDING"),
+            "reason": result.get("reason", ""),
+        }
         if db_review:
             db_review.status = "COMPLETED"
             db_review.completed_at = datetime.utcnow()
@@ -208,6 +213,47 @@ async def create_review(request: CreateReviewRequest, db: Session = Depends(get_
 async def create_review_from_diff(request: CreateReviewRequest, db: Session = Depends(get_db)):
     """Submit a git diff specifically. Alias for POST /reviews."""
     return await create_review(request, db)
+
+
+@router.post("/reviews/upload", response_model=ReviewSummarySchema)
+async def create_review_from_upload(
+    file: UploadFile = File(...),
+    repo_name: str = Form("uploaded-repository"),
+    language: str = Form("python"),
+    db: Session = Depends(get_db),
+):
+    """Review text source files from a ZIP without executing or extracting them to disk."""
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=415, detail="Upload a .zip archive")
+    payload = await file.read()
+    if len(payload) > settings.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Archive exceeds configured size limit")
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            parts = []
+            for entry in archive.infolist():
+                if entry.is_dir() or entry.filename.startswith(("/", "\\")):
+                    continue
+                if entry.file_size > settings.max_file_size_mb * 1024 * 1024:
+                    continue
+                try:
+                    text_content = archive.read(entry).decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+                parts.append(f"# --- {entry.filename} ---\n{text_content}")
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="Invalid ZIP archive") from exc
+    if not parts:
+        raise HTTPException(status_code=400, detail="Archive contains no UTF-8 text files")
+    return await create_review(
+        CreateReviewRequest(
+            diff_text="\n\n".join(parts),
+            repo_name=repo_name,
+            language=language,
+            submission_type="files",
+        ),
+        db,
+    )
 
 
 @router.get("/reviews", response_model=List[ReviewSummarySchema])
