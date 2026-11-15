@@ -1,0 +1,45 @@
+"""
+Sample vulnerable code for demonstrating REQUEST CHANGES workflow.
+WARNING: This file intentionally contains security vulnerabilities for testing.
+DO NOT use this code in production.
+"""
+import os
+import subprocess
+import sqlite3
+
+# VULNERABILITY: Hardcoded credentials
+DATABASE_PASSWORD = "super_secret_password_123"
+API_KEY = "sk-1234567890abcdef"
+SECRET_TOKEN = "my-jwt-secret-key"
+
+
+def get_user(username):
+    """Get user - VULNERABLE to SQL injection."""
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    query = f"SELECT * FROM users WHERE username = '{username}'"
+    cursor.execute(query)
+    return cursor.fetchall()
+
+
+def run_report(report_name):
+    """Run a report - VULNERABILITY: Command injection."""
+    result = subprocess.run(
+        f"python reports/{report_name}.py",
+        shell=True,
+        capture_output=True
+    )
+    return result.stdout
+
+
+def process_user_input(data):
+    """Process data - VULNERABILITY: eval usage."""
+    return eval(data)
+
+
+def login(username, password):
+    """Login - VULNERABILITY: hardcoded credentials and timing attack."""
+    stored_password = "admin123"
+    if password == stored_password:
+        return True
+    return False

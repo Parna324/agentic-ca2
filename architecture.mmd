@@ -1,0 +1,14 @@
+flowchart LR
+  UI[Next.js] --> API[FastAPI]
+  API --> S[Shared change state]
+  S --> D[Diff]
+  D --> A[Style]
+  D --> B[Security]
+  D --> C[Test coverage]
+  A --> M[Reviewer manager]
+  B --> M
+  C --> M
+  M --> F[Fix suggestion]
+  M --> R[Recommendation]
+  API --> DB[(SQLite)]
+  API --> L[Audit log]
